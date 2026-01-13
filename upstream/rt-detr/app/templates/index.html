@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RT-DETR 视频分析</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        h1 { text-align: center; margin-bottom: 30px; color: #00d9ff; }
+        .card {
+            background: #16213e;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 1px solid #0f3460;
+        }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; color: #aaa; }
+        input[type="text"] {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #0f3460;
+            border-radius: 8px;
+            background: #0f3460;
+            color: #fff;
+            font-size: 14px;
+        }
+        button {
+            background: #00d9ff;
+            color: #1a1a2e;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        button:hover { background: #00b8d9; }
+        button.stop { background: #ff4757; }
+        button.stop:hover { background: #ff3344; }
+        #video-container {
+            position: relative;
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            min-height: 400px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        #video-frame {
+            max-width: 100%;
+            display: block;
+        }
+        #status {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.7);
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        #detections {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        .detection-item {
+            padding: 4px 0;
+            border-bottom: 1px solid #333;
+        }
+        .detection-item:last-child { border-bottom: none; }
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            margin-right: 5px;
+        }
+        .badge-person { background: #e74c3c; }
+        .badge-car { background: #3498db; }
+        .badge-dog { background: #2ecc71; }
+        .alert-box {
+            background: #ff4757;
+            color: #fff;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 10px;
+            display: none;
+        }
+        .health-status {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .health-item {
+            background: #0f3460;
+            padding: 15px 25px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .health-value { font-size: 24px; font-weight: bold; color: #00d9ff; }
+        .health-label { font-size: 12px; color: #aaa; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>RT-DETR 实时视频分析</h1>
+
+        <div class="health-status">
+            <div class="health-item">
+                <div class="health-value" id="gpu-status">检测中...</div>
+                <div class="health-label">GPU</div>
+            </div>
+            <div class="health-item">
+                <div class="health-value" id="model-status">检测中...</div>
+                <div class="health-label">模型</div>
+            </div>
+            <div class="health-item">
+                <div class="health-value" id="session-status">-</div>
+                <div class="health-label">会话</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="form-group">
+                <label>视频流地址 (RTSP 或 HTTP)</label>
+                <input type="text" id="stream-url" placeholder="rtsp://localhost:8554/camera 或 http://..." value="rtsp://localhost:8554/camera">
+            </div>
+            <button onclick="startAnalysis()">开始分析</button>
+            <button class="stop" onclick="stopAnalysis()">停止</button>
+        </div>
+
+        <div class="card">
+            <div id="video-container">
+                <div id="status">等待视频流...</div>
+                <img id="video-frame" style="display:none;">
+                <div id="detections"></div>
+            </div>
+            <div id="alert-box" class="alert-box"></div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let sessionId = null;
+
+        // 检查健康状态
+        async function checkHealth() {
+            try {
+                const res = await fetch('/api/v1/video/health');
+                const data = await res.json();
+                document.getElementById('gpu-status').textContent = data.gpu_available ? '是' : '否';
+                document.getElementById('model-status').textContent = data.model_loaded ? '已加载' : '未加载';
+                document.getElementById('gpu-status').style.color = data.gpu_available ? '#2ecc71' : '#e74c3c';
+            } catch (e) {
+                console.error('Health check failed:', e);
+            }
+        }
+
+        async function startAnalysis() {
+            const streamUrl = document.getElementById('stream-url').value;
+            if (!streamUrl) {
+                alert('请输入视频流地址');
+                return;
+            }
+
+            // 停止现有分析
+            if (ws) ws.close();
+            if (sessionId) {
+                await fetch('/api/v1/video/stop', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({session_id: sessionId})
+                });
+            }
+
+            // 启动分析
+            const res = await fetch('/api/v1/video/start', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({stream_url: streamUrl})
+            });
+            const data = await res.json();
+
+            if (data.status !== 'running') {
+                alert('启动失败: ' + data.message);
+                return;
+            }
+
+            sessionId = data.session_id;
+            document.getElementById('session-status').textContent = sessionId.substring(0, 8);
+            document.getElementById('status').textContent = '连接中...';
+
+            // 连接 WebSocket
+            connectWebSocket();
+        }
+
+        function connectWebSocket() {
+            ws = new WebSocket(`ws://${location.host}/ws?session_id=${sessionId}`);
+
+            ws.onopen = () => {
+                document.getElementById('status').textContent = '正在分析...';
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+
+                if (data.type === 'frame_result') {
+                    if (data.base64_frame) {
+                        document.getElementById('video-frame').src = 'data:image/jpeg;base64,' + data.base64_frame;
+                        document.getElementById('video-frame').style.display = 'block';
+                    }
+                    showDetections(data.detections || []);
+                } else if (data.type === 'alert') {
+                    showAlert(data);
+                } else if (data.type === 'status') {
+                    document.getElementById('status').textContent = data.message;
+                } else if (data.type === 'error') {
+                    document.getElementById('status').textContent = '错误: ' + data.message;
+                }
+            };
+
+            ws.onclose = () => {
+                document.getElementById('status').textContent = '连接已关闭';
+            };
+
+            ws.onerror = (err) => {
+                console.error('WebSocket error:', err);
+                document.getElementById('status').textContent = '连接错误';
+            };
+        }
+
+        function showDetections(detections) {
+            const container = document.getElementById('detections');
+            if (!detections || detections.length === 0) {
+                container.innerHTML = '<span style="color:#666">未检测到目标</span>';
+                return;
+            }
+
+            const html = detections.map(d => `
+                <div class="detection-item">
+                    <span class="badge badge-${d.class_name}">${d.class_name}</span>
+                    ${Math.round(d.confidence * 100)}%
+                </div>
+            `).join('');
+            container.innerHTML = html;
+        }
+
+        function showAlert(data) {
+            const box = document.getElementById('alert-box');
+            box.style.display = 'block';
+            box.innerHTML = `<strong>[告警]</strong> 检测到 ${data.class_name}，置信度: ${Math.round(data.confidence * 100)}%`;
+            setTimeout(() => box.style.display = 'none', 5000);
+        }
+
+        async function stopAnalysis() {
+            if (sessionId) {
+                await fetch('/api/v1/video/stop', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({session_id: sessionId})
+                });
+                sessionId = null;
+            }
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+            document.getElementById('status').textContent = '已停止';
+            document.getElementById('video-frame').style.display = 'none';
+            document.getElementById('detections').innerHTML = '';
+            document.getElementById('session-status').textContent = '-';
+        }
+
+        // 初始化
+        checkHealth();
+        setInterval(checkHealth, 10000);
+    </script>
+</body>
+</html>

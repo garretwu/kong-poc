@@ -1,0 +1,181 @@
+# Kong Gateway 配置文件
+# Kong 3.x 格式
+
+_format_version: "3.0"
+_transform: true
+
+# ==================== Consumer & Credentials ====================
+consumers:
+  - username: video-client
+    custom_id: video-client-001
+    keyauth_credentials:
+      - key: video-api-key-001
+  - username: llm-client
+    custom_id: llm-client-001
+    keyauth_credentials:
+      - key: llm-api-key-001
+
+# ==================== Services ====================
+services:
+  # ==================== RT-DETR 视频分析服务 ====================
+  - name: rt-detr-service
+    url: http://rt-detr-service:8080
+    retries: 3
+    connect_timeout: 10000
+    read_timeout: 60000
+    write_timeout: 60000
+
+    routes:
+      - name: rt-detr-route
+        paths:
+          - /api/v1/video
+        strip_path: false
+        preserve_host: false
+
+    plugins:
+      - name: key-auth
+        config:
+          hide_credentials: true
+      - name: rate-limiting
+        config:
+          minute: 100
+          policy: local
+      - name: request-size-limiting
+        config:
+          allowed_payload_size: 1048576
+      - name: cors
+        config:
+          origins:
+            - "*"
+          methods:
+            - GET
+            - POST
+            - OPTIONS
+          headers:
+            - Authorization
+            - Content-Type
+            - X-API-Key
+          exposed_headers:
+            - X-Request-ID
+          credentials: true
+          max_age: 3600
+
+  # ==================== RT-DETR WebSocket 服务 ====================
+  - name: rt-detr-websocket
+    url: http://rt-detr-service:8080
+    retries: 3
+    connect_timeout: 10000
+    read_timeout: 3600000
+    write_timeout: 3600000
+
+    routes:
+      - name: rt-detr-ws-route
+        paths:
+          - /ws
+        strip_path: false
+        preserve_host: false
+
+    plugins:
+      - name: cors
+        config:
+          origins:
+            - "*"
+          methods:
+            - GET
+            - POST
+            - OPTIONS
+          headers:
+            - Authorization
+            - Sec-WebSocket-Protocol
+          exposed_headers:
+            - X-Request-ID
+          credentials: true
+          max_age: 3600
+
+  # ==================== RT-DETR 前端页面 ====================
+  - name: rt-detr-frontend
+    url: http://rt-detr-service:8080
+    routes:
+      - name: rt-detr-frontend-route
+        paths:
+          - /
+        strip_path: true
+        preserve_host: false
+
+  # ==================== Mock LLM 服务 ====================
+  - name: mock-llm
+    url: http://mock-llm:8000
+    retries: 3
+    connect_timeout: 10000
+    read_timeout: 60000
+    write_timeout: 60000
+
+    routes:
+      - name: mock-llm-route
+        paths:
+          - /v1/chat/completions
+        strip_path: false
+        preserve_host: false
+
+    plugins:
+      - name: key-auth
+        config:
+          hide_credentials: true
+      - name: cors
+        config:
+          origins:
+            - "*"
+          methods:
+            - GET
+            - POST
+            - OPTIONS
+          headers:
+            - Authorization
+            - Content-Type
+          exposed_headers:
+            - X-Request-ID
+          credentials: true
+          max_age: 3600
+
+  # ==================== vLLM 服务 ====================
+  - name: vllm
+    url: http://vllm:8000
+    retries: 3
+    connect_timeout: 10000
+    read_timeout: 120000
+    write_timeout: 120000
+
+    routes:
+      - name: vllm-route
+        paths:
+          - /v2/chat/completions
+        strip_path: false
+        preserve_host: false
+
+    plugins:
+      - name: key-auth
+        config:
+          hide_credentials: true
+      - name: cors
+        config:
+          origins:
+            - "*"
+          methods:
+            - GET
+            - POST
+            - OPTIONS
+          headers:
+            - Authorization
+            - Content-Type
+          exposed_headers:
+            - X-Request-ID
+          credentials: true
+          max_age: 3600
+
+# ==================== 通用插件 ====================
+plugins:
+  - name: response-ratelimiting
+    config:
+      limits:
+        video:
+          minute: 1000

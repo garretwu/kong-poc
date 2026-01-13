@@ -1,0 +1,156 @@
+services:
+  # ==================== MediaMTX (协议转换) ====================
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: mediamtx
+    restart: unless-stopped
+    ports:
+      - "8554:8554"   # RTSP
+      - "8080:8080"   # HTTP/FLV
+      - "8888:8888"   # WebSocket
+    volumes: []
+    environment:
+      - MTX_LOG_LEVEL=info
+    networks:
+      - video-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9997/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ==================== Kong Gateway ====================
+  kong-gateway:
+    image: kong:3.6
+    container_name: kong-gateway
+    restart: unless-stopped
+    ports:
+      - "8000:8000"   # Kong Proxy HTTP
+      - "8443:8443"   # Kong Proxy HTTPS
+      - "8001:8001"   # Kong Admin HTTP
+      - "8444:8444"   # Kong Admin HTTPS
+    environment:
+      - KONG_DATABASE=off
+      - KONG_DECLARATIVE_CONFIG=/kong/kong.yml
+      - KONG_PROXY_LISTEN=0.0.0.0:8000
+      - KONG_ADMIN_LISTEN=0.0.0.0:8001
+      - KONG_LOG_LEVEL=info
+      - KONG_NGINX_PROXY_PROXY_BUFFER_SIZE=128k
+      - KONG_NGINX_PROXY_PROXY_BUFFERS=4 256k
+      - KONG_NGINX_PROXY_PROXY_BUFFER_SIZE=128k
+    volumes:
+      - ./kong/kong.yml:/kong/kong.yml:ro
+    networks:
+      - video-network
+    depends_on:
+      - mediamtx
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ==================== RT-DETR 分析服务 ====================
+  rt-detr-service:
+    build:
+      context: ./upstream/rt-detr
+      dockerfile: Dockerfile
+    container_name: rt-detr-service
+    restart: unless-stopped
+    ports:
+      - "8081:8080"   # 直接访问端口 (开发用)
+    environment:
+      - RT_DETR_MODEL_PATH=/models/rt-detr.pt
+      - RT_DETR_DEVICE=cuda
+      - RT_DETR_DEBUG=false
+      - RT_DETR_CONFIDENCE_THRESHOLD=0.5
+      - RT_DETR_ALERT_ENABLED=true
+      - RT_DETR_ALERT_CONFIDENCE_THRESHOLD=0.7
+    volumes:
+      # 模型文件 (需要准备 .pt 文件)
+      - ./models:/models:ro
+    networks:
+      - video-network
+    depends_on:
+      - kong-gateway
+      - mediamtx
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/v1/video/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+        limits:
+          # memory: 4G
+          cpus: '4.0'
+
+  # ==================== Mock LLM 服务 ====================
+  mock-llm:
+    build:
+      context: ./upstream/mock-llm
+      dockerfile: Dockerfile
+    container_name: mock-llm
+    restart: unless-stopped
+    ports:
+      - "8082:8000"   # 直接访问端口 (开发用)
+    networks:
+      - video-network
+    depends_on:
+      - kong-gateway
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ==================== vLLM 服务 (使用预编译的venv) ====================
+  vllm:
+    build:
+      context: ./upstream/vllm
+      dockerfile: Dockerfile
+    container_name: vllm
+    restart: unless-stopped
+    ports:
+      - "8083:8000"
+    volumes:
+      # 挂载预编译的 venv
+      - /home/garywu/workspace/edge-vllm-demo/.venv:/venv:ro
+      # 挂载 vllm 源代码 (editable install 需要)
+      - /home/garywu/workspace/vllm:/home/garywu/workspace/vllm:ro
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+    networks:
+      - video-network
+    depends_on:
+      - kong-gateway
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+# ==================== 网络配置 ====================
+networks:
+  video-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+# ==================== 卷声明 ====================
+volumes:
+  models:
+    driver: local

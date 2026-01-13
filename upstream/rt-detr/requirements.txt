@@ -1,0 +1,23 @@
+# FastAPI and Web Server
+fastapi>=0.100.0
+uvicorn[standard]>=0.23.0
+python-multipart>=0.0.6
+
+# AI Model
+ultralytics>=8.0.0
+torch>=2.0.0
+torchvision>=0.15.0
+
+# Video Processing
+opencv-python>=4.8.0
+numpy>=1.24.0
+
+# Configuration
+pydantic>=2.0.0
+
+# HTTP Client (for Kong integration)
+httpx>=0.24.0
+
+# Testing (optional)
+pytest>=7.0.0
+pytest-asyncio>=0.21.0

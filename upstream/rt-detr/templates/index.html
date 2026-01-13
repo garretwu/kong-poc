@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RT-DETRv2 实时视频分析</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            text-align: center;
+            padding: 20px 0;
+            border-bottom: 1px solid #333;
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            font-size: 24px;
+            color: #00d4ff;
+        }
+
+        .controls {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        input[type="text"] {
+            padding: 10px 15px;
+            border: 1px solid #444;
+            border-radius: 6px;
+            background: #2a2a3e;
+            color: #fff;
+            width: 350px;
+            font-size: 14px;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #00d4ff;
+        }
+
+        button {
+            padding: 10px 25px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: #00d4ff;
+            color: #1a1a2e;
+        }
+
+        .btn-primary:hover {
+            background: #00b8e6;
+        }
+
+        .btn-danger {
+            background: #ff4757;
+            color: #fff;
+        }
+
+        .btn-danger:hover {
+            background: #ff3344;
+        }
+
+        .btn-secondary {
+            background: #444;
+            color: #fff;
+        }
+
+        .btn-secondary:hover {
+            background: #555;
+        }
+
+        .status-bar {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .status-item {
+            background: #2a2a3e;
+            padding: 10px 20px;
+            border-radius: 6px;
+            text-align: center;
+        }
+
+        .status-label {
+            font-size: 12px;
+            color: #888;
+            margin-bottom: 5px;
+        }
+
+        .status-value {
+            font-size: 16px;
+            font-weight: bold;
+            color: #00d4ff;
+        }
+
+        .video-container {
+            background: #0f0f1a;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+        }
+
+        #annotated-canvas {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .stat-card {
+            background: #2a2a3e;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .stat-card h3 {
+            font-size: 28px;
+            color: #00d4ff;
+            margin-bottom: 5px;
+        }
+
+        .stat-card p {
+            font-size: 12px;
+            color: #888;
+        }
+
+        /* 告警通知样式 */
+        .alert-notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: linear-gradient(135deg, #ff4757, #ff6b81);
+            color: white;
+            padding: 15px 25px;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(255, 71, 87, 0.4);
+            z-index: 1000;
+            animation: slideIn 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+            max-width: 350px;
+        }
+
+        .alert-notification h4 {
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .alert-notification p {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .alert-notification .confidence {
+            font-size: 12px;
+            opacity: 0.8;
+            margin-top: 5px;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(120%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideOut {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(120%);
+                opacity: 0;
+            }
+        }
+
+        .alert-removing {
+            animation: slideOut 0.3s ease-in forwards;
+        }
+
+        /* 检测信息面板 */
+        .detection-panel {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(42, 42, 62, 0.95);
+            padding: 15px 20px;
+            border-radius: 12px;
+            backdrop-filter: blur(10px);
+            border: 1px solid #333;
+        }
+
+        .detection-panel h4 {
+            color: #00d4ff;
+            margin-bottom: 10px;
+        }
+
+        .detection-list {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .detection-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 0;
+            border-bottom: 1px solid #333;
+            font-size: 13px;
+        }
+
+        .detection-item:last-child {
+            border-bottom: none;
+        }
+
+        .detection-name {
+            color: #fff;
+        }
+
+        .detection-conf {
+            color: #00d4ff;
+        }
+
+        /* 连接状态指示器 */
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #888;
+        }
+
+        .status-dot.connected {
+            background: #00ff88;
+            box-shadow: 0 0 10px #00ff88;
+        }
+
+        .status-dot.disconnected {
+            background: #ff4757;
+        }
+
+        .status-dot.connecting {
+            background: #ffaa00;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>RT-DETRv2 实时视频分析</h1>
+            <p style="color: #888; margin-top: 10px;">COCO 80类目标检测</p>
+        </header>
+
+        <div class="controls">
+            <div class="input-group">
+                <input type="text" id="stream-url"
+                    placeholder="输入视频流地址 (http://mediamtx:8080/camera.flv)"
+                    value="http://mediamtx:8080/camera.flv">
+                <button class="btn-primary" onclick="startAnalysis()">开始分析</button>
+                <button class="btn-danger hidden" id="stop-btn" onclick="stopAnalysis()">停止</button>
+            </div>
+        </div>
+
+        <div class="status-bar">
+            <div class="status-item">
+                <div class="status-label">连接状态</div>
+                <div class="connection-status">
+                    <span class="status-dot disconnected" id="status-dot"></span>
+                    <span id="status-text">未连接</span>
+                </div>
+            </div>
+            <div class="status-item">
+                <div class="status-label">已处理帧数</div>
+                <div class="status-value" id="frame-count">0</div>
+            </div>
+            <div class="status-item">
+                <div class="status-label">检测目标数</div>
+                <div class="status-value" id="detection-count">0</div>
+            </div>
+            <div class="status-item">
+                <div class="status-label">FPS</div>
+                <div class="status-value" id="fps">0</div>
+            </div>
+        </div>
+
+        <div class="video-container">
+            <canvas id="annotated-canvas" width="800" height="600"></canvas>
+        </div>
+
+        <div class="stats">
+            <div class="stat-card">
+                <h3 id="stat-person">0</h3>
+                <p>人物</p>
+            </div>
+            <div class="stat-card">
+                <h3 id="stat-vehicle">0</h3>
+                <p>车辆</p>
+            </div>
+            <div class="stat-card">
+                <h3 id="stat-animal">0</h3>
+                <p>动物</p>
+            </div>
+            <div class="stat-card">
+                <h3 id="stat-other">0</h3>
+                <p>其他</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 告警通知容器 -->
+    <div id="alert-container"></div>
+
+    <!-- 检测信息面板 -->
+    <div class="detection-panel hidden" id="detection-panel">
+        <h4>当前帧检测结果</h4>
+        <div class="detection-list" id="detection-list"></div>
+    </div>
+
+    <script>
+        let ws = null;
+        let sessionId = null;
+        let frameCount = 0;
+        let detectionStats = {};
+        let lastFrameTime = Date.now();
+        let fps = 0;
+
+        const canvas = document.getElementById('annotated-canvas');
+        const ctx = canvas.getContext('2d');
+
+        // COCO 类别分组
+        const categoryGroups = {
+            person: ['person'],
+            vehicle: ['bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat'],
+            animal: ['bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe'],
+            other: []
+        };
+
+        function updateStats(detections) {
+            // 重置统计
+            frameCount++;
+            document.getElementById('frame-count').textContent = frameCount;
+            document.getElementById('detection-count').textContent = detections.length;
+
+            // 计算 FPS
+            const now = Date.now();
+            const delta = now - lastFrameTime;
+            if (delta >= 1000) {
+                fps = Math.round((frameCount * 1000) / delta);
+                document.getElementById('fps').textContent = fps;
+                lastFrameTime = now;
+            }
+
+            // 更新类别统计
+            const stats = { person: 0, vehicle: 0, animal: 0, other: 0 };
+
+            for (const det of detections) {
+                const name = det.class_name.toLowerCase();
+                let added = false;
+
+                for (const [group, classes] of Object.entries(categoryGroups)) {
+                    if (classes.includes(name)) {
+                        stats[group]++;
+                        added = true;
+                        break;
+                    }
+                }
+
+                if (!added) {
+                    stats.other++;
+                }
+            }
+
+            document.getElementById('stat-person').textContent = stats.person;
+            document.getElementById('stat-vehicle').textContent = stats.vehicle;
+            document.getElementById('stat-animal').textContent = stats.animal;
+            document.getElementById('stat-other').textContent = stats.other;
+
+            // 更新检测列表面板
+            updateDetectionPanel(detections);
+        }
+
+        function updateDetectionPanel(detections) {
+            const panel = document.getElementById('detection-panel');
+            const list = document.getElementById('detection-list');
+
+            if (detections.length === 0) {
+                panel.classList.add('hidden');
+                return;
+            }
+
+            panel.classList.remove('hidden');
+            list.innerHTML = detections.map(det => `
+                <div class="detection-item">
+                    <span class="detection-name">${det.class_name}</span>
+                    <span class="detection-conf">${(det.confidence * 100).toFixed(1)}%</span>
+                </div>
+            `).join('');
+        }
+
+        function renderFrame(base64Image) {
+            const img = new Image();
+            img.onload = () => {
+                // 调整 Canvas 大小以匹配图像
+                canvas.width = img.width;
+                canvas.height = img.height;
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(img, 0, 0);
+            };
+            img.src = 'data:image/jpeg;base64,' + base64Image;
+        }
+
+        function updateConnectionStatus(status, text) {
+            const dot = document.getElementById('status-dot');
+            const textEl = document.getElementById('status-text');
+
+            dot.className = 'status-dot ' + status;
+            textEl.textContent = text;
+        }
+
+        function showAlert(data) {
+            const container = document.getElementById('alert-container');
+            const alert = document.createElement('div');
+            alert.className = 'alert-notification';
+            alert.innerHTML = `
+                <h4>⚠️ ${data.class_name}</h4>
+                <p>检测到目标物体</p>
+                <div class="confidence">置信度: ${(data.confidence * 100).toFixed(1)}%</div>
+            `;
+
+            container.appendChild(alert);
+
+            // 控制台输出
+            console.log(`[ALERT] 检测到 ${data.class_name} 置信度: ${(data.confidence * 100).toFixed(1)}%`);
+
+            // 3秒后移除
+            setTimeout(() => {
+                alert.classList.add('alert-removing');
+                setTimeout(() => alert.remove(), 300);
+            }, 3000);
+        }
+
+        async function startAnalysis() {
+            const streamUrl = document.getElementById('stream-url').value;
+            if (!streamUrl) {
+                alert('请输入视频流地址');
+                return;
+            }
+
+            // 禁用开始按钮
+            document.querySelector('.btn-primary').disabled = true;
+
+            try {
+                // 调用 API 启动分析
+                const response = await fetch('/api/v1/video/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ stream_url: streamUrl })
+                });
+
+                if (!response.ok) {
+                    throw new Error('启动失败');
+                }
+
+                const data = await response.json();
+                sessionId = data.session_id;
+
+                // 建立 WebSocket 连接
+                ws = new WebSocket(`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/stream/${sessionId}`);
+
+                ws.onopen = () => {
+                    updateConnectionStatus('connected', '已连接');
+                    document.getElementById('stop-btn').classList.remove('hidden');
+                    document.querySelector('.btn-primary').classList.add('hidden');
+                };
+
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+
+                    if (data.type === 'frame_result') {
+                        if (data.annotated_frame) {
+                            renderFrame(data.annotated_frame);
+                        }
+                        updateStats(data.detections);
+                    } else if (data.type === 'alert') {
+                        showAlert(data.data);
+                    } else if (data.type === 'error') {
+                        console.error('Error:', data.message);
+                        alert('分析出错: ' + data.message);
+                    } else if (data.type === 'status') {
+                        console.log('Status:', data.message);
+                    }
+                };
+
+                ws.onclose = () => {
+                    updateConnectionStatus('disconnected', '连接断开');
+                    document.getElementById('stop-btn').classList.add('hidden');
+                    document.querySelector('.btn-primary').classList.remove('hidden');
+                    document.querySelector('.btn-primary').disabled = false;
+                };
+
+                ws.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                };
+
+            } catch (error) {
+                console.error('Start analysis error:', error);
+                alert('启动失败: ' + error.message);
+                document.querySelector('.btn-primary').disabled = false;
+            }
+        }
+
+        async function stopAnalysis() {
+            if (ws) {
+                ws.send(JSON.stringify({ type: 'control', action: 'stop' }));
+                ws.close();
+                ws = null;
+            }
+
+            if (sessionId) {
+                try {
+                    await fetch('/api/v1/video/stop', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ session_id: sessionId })
+                    });
+                } catch (error) {
+                    console.error('Stop error:', error);
+                }
+                sessionId = null;
+            }
+
+            updateConnectionStatus('disconnected', '未连接');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+    </script>
+</body>
+</html>
