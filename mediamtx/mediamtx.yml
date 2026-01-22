@@ -1,0 +1,22 @@
+# MediaMTX v1.15.6 config
+
+logLevel: info
+
+api: yes
+apiAddress: :9997
+
+metrics: yes
+metricsAddress: :9998
+
+rtsp: yes
+rtspAddress: :8554
+
+rtmp: no
+hls: no
+webrtc: yes
+webrtcAddress: :8889
+srt: no
+
+paths:
+  camera:
+    source: publisher

@@ -116,7 +116,7 @@ rtdetr-health:  ## Check RT-DETR service health
 
 rtdetr-kong-health:  ## Check RT-DETR through Kong proxy
 	@echo "${YELLOW}Checking RT-DETR through Kong...${RESET}"
-	@curl -s -H "X-API-Key: kong-api-key-video-2024" http://localhost:8000/api/v1/video/health && echo " ✓" || \
+	@curl -s -H "X-API-Key: video-api-key-001" http://localhost:8000/api/v1/video/health && echo " ✓" || \
 		echo "${RED}✗ RT-DETR through Kong not available${RESET}"
 
 rtdetr-push-test:  ## Push test video to RTSP (requires ffmpeg and test.mp4)

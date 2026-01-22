@@ -4,7 +4,7 @@
 
 ## 特性
 
-- **实时分析**: 支持 FLV/HTTP/RTSP 视频流
+- **实时分析**: 支持 RTSP 视频流
 - **RT-DETRv2**: 使用最新 RT-DETRv2 模型进行目标检测
 - **WebSocket 推送**: 实时推送检测结果和告警到浏览器
 - **API 集成**: 通过 Kong Gateway 提供 API Key 认证
@@ -52,7 +52,7 @@ POST /api/v1/video/start
 Content-Type: application/json
 
 {
-    "stream_url": "http://mediamtx:8080/camera.flv",
+    "stream_url": "rtsp://mediamtx:8554/camera",
     "enable_drawing": true
 }
 ```

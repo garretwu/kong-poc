@@ -11,8 +11,8 @@ class VideoRequest(BaseModel):
     """视频流分析请求"""
     stream_url: str = Field(
         ...,
-        description="视频流地址 (HTTP/FLV/RTSP)",
-        example="http://mediamtx:8080/camera.flv"
+        description="视频流地址 (RTSP)",
+        example="rtsp://mediamtx:8554/camera"
     )
     enable_drawing: bool = Field(
         default=True,

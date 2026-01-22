@@ -43,6 +43,29 @@ class ConnectionManager:
         # session_id -> AnalysisSession
         self._sessions: Dict[str, AnalysisSession] = {}
 
+    def ensure_session(self, session_id: str, stream_url: str = "") -> AnalysisSession:
+        """
+        确保会话存在，不存在则创建。
+
+        Args:
+            session_id: 会话 ID
+            stream_url: 流地址（可选）
+
+        Returns:
+            AnalysisSession 对象
+        """
+        if session_id not in self._sessions:
+            self._sessions[session_id] = AnalysisSession(
+                session_id=session_id,
+                stream_url=stream_url,
+                status=SessionStatus.PENDING
+            )
+        else:
+            # 仅在尚未设置流地址时补充
+            if stream_url and not self._sessions[session_id].stream_url:
+                self._sessions[session_id].stream_url = stream_url
+        return self._sessions[session_id]
+
     async def connect(self, session_id: str, websocket: WebSocket) -> AnalysisSession:
         """建立 WebSocket 连接并创建会话
 
@@ -55,19 +78,14 @@ class ConnectionManager:
         """
         await websocket.accept()
 
-        if session_id not in self._sessions:
-            self._sessions[session_id] = AnalysisSession(
-                session_id=session_id,
-                stream_url="",
-                status=SessionStatus.PENDING
-            )
+        session = self.ensure_session(session_id)
 
         if session_id not in self._connections:
             self._connections[session_id] = set()
 
         self._connections[session_id].add(websocket)
 
-        return self._sessions[session_id]
+        return session
 
     def disconnect(self, session_id: str, websocket: WebSocket):
         """断开 WebSocket 连接"""
@@ -85,21 +103,28 @@ class ConnectionManager:
 
     def update_session_stream(self, session_id: str, stream_url: str):
         """更新会话流地址"""
-        if session_id in self._sessions:
-            self._sessions[session_id].stream_url = stream_url
+        session = self.ensure_session(session_id, stream_url)
+        session.stream_url = stream_url
 
-    def update_session_status(self, session_id: str, status: SessionStatus):
+    def update_session_status(self, session_id: str, status: SessionStatus | str):
         """更新会话状态"""
-        if session_id in self._sessions:
-            self._sessions[session_id].status = status
+        session = self.ensure_session(session_id)
+        if isinstance(status, str):
+            try:
+                status = SessionStatus(status)
+            except ValueError:
+                status = SessionStatus.ERROR
+        session.status = status
 
     def increment_frame_count(self, session_id: str):
         """增加帧计数"""
-        if session_id in self._sessions:
-            self._sessions[session_id].frame_count += 1
+        session = self.ensure_session(session_id)
+        session.frame_count += 1
 
     async def send_json(self, session_id: str, data: dict):
         """向指定会话的所有连接发送 JSON 数据"""
+        # 确保会话存在，避免后续统计访问异常
+        self.ensure_session(session_id)
         if session_id in self._connections:
             message = json.dumps(data)
             for connection in self._connections[session_id]:
@@ -191,7 +216,7 @@ class ConnectionManager:
         return [
             {
                 "session_id": sid,
-                "status": sess.status.value,
+                "status": sess.status.value if isinstance(sess.status, SessionStatus) else str(sess.status),
                 "frame_count": sess.frame_count,
                 "stream_url": sess.stream_url
             }

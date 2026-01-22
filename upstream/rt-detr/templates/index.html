@@ -315,8 +315,8 @@
         <div class="controls">
             <div class="input-group">
                 <input type="text" id="stream-url"
-                    placeholder="输入视频流地址 (http://mediamtx:8080/camera.flv)"
-                    value="http://mediamtx:8080/camera.flv">
+                    placeholder="输入视频流地址 (rtsp://mediamtx:8554/camera)"
+                    value="rtsp://mediamtx:8554/camera">
                 <button class="btn-primary" onclick="startAnalysis()">开始分析</button>
                 <button class="btn-danger hidden" id="stop-btn" onclick="stopAnalysis()">停止</button>
             </div>
@@ -384,6 +384,7 @@
         let detectionStats = {};
         let lastFrameTime = Date.now();
         let fps = 0;
+        const API_KEY = 'video-api-key-001'; // Kong consumer: video-client
 
         const canvas = document.getElementById('annotated-canvas');
         const ctx = canvas.getContext('2d');
@@ -514,7 +515,11 @@
                 // 调用 API 启动分析
                 const response = await fetch('/api/v1/video/start', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'apikey': API_KEY,
+                        'X-API-Key': API_KEY
+                    },
                     body: JSON.stringify({ stream_url: streamUrl })
                 });
 
@@ -581,7 +586,11 @@
                 try {
                     await fetch('/api/v1/video/stop', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'apikey': API_KEY,
+                            'X-API-Key': API_KEY
+                        },
                         body: JSON.stringify({ session_id: sessionId })
                     });
                 } catch (error) {

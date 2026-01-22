@@ -4,6 +4,7 @@ API 端点
 
 import asyncio
 import uuid
+from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from fastapi.responses import HTMLResponse
@@ -15,13 +16,14 @@ from app.models.schema import (
     SessionInfo,
     HealthResponse
 )
-from app.services.websocket_manager import connection_manager
+from app.services.websocket_manager import connection_manager, SessionStatus
 from app.services.video_stream import create_stream_reader, VideoStreamError
 from app.services.rt_detr_inference import RTDETRv2Inferencer
 from app.config import settings
 
 
 router = APIRouter(prefix="/api/v1/video", tags=["video"])
+TEMPLATE_PATH = Path(__file__).resolve().parents[2] / "templates" / "index.html"
 
 # 全局推理器实例
 _inferencer: Optional[RTDETRv2Inferencer] = None
@@ -47,21 +49,25 @@ async def run_analysis(session_id: str, stream_url: str):
         session_id: 会话 ID
         stream_url: 流地址
     """
+    print(f"[run_analysis] start session={session_id} url={stream_url}")
     inferencer = get_inferencer()
     stream_reader = create_stream_reader(stream_url)
 
     try:
         # 更新会话状态
-        connection_manager.update_session_status(session_id, "running")
-        await connection_manager.send_status(session_id, "running", "Analysis started")
+        connection_manager.update_session_status(session_id, SessionStatus.RUNNING)
+        await connection_manager.send_status(session_id, SessionStatus.RUNNING.value, "Analysis started")
 
         # 连接视频流
         if not stream_reader.connect():
+            print(f"[run_analysis] connect failed session={session_id}")
             await connection_manager.send_error(
                 session_id,
                 "Failed to connect to video stream"
             )
             return
+        else:
+            print(f"[run_analysis] connect ok session={session_id}")
 
         # 发送流信息
         stream_info = stream_reader.get_stream_info()
@@ -79,6 +85,8 @@ async def run_analysis(session_id: str, stream_url: str):
         async for frame in stream_reader.stream_frames():
             # RT-DETR 推理
             detections = inferencer.infer(frame.frame)
+            if frame.frame_index % 10 == 0:
+                print(f"[run_analysis] frame {frame.frame_index} det={len(detections)}")
 
             # 绘制标注
             if settings.frame_quality > 0:
@@ -110,10 +118,12 @@ async def run_analysis(session_id: str, stream_url: str):
                     )
 
     except Exception as e:
+        print(f"[run_analysis] error session={session_id} err={e}")
         await connection_manager.send_error(session_id, str(e))
     finally:
         stream_reader.stop()
-        connection_manager.update_session_status(session_id, "stopped")
+        connection_manager.update_session_status(session_id, SessionStatus.STOPPED)
+        print(f"[run_analysis] stop session={session_id}")
 
 
 @router.post("/start", response_model=VideoResponse)
@@ -130,15 +140,16 @@ async def start_analysis(request: VideoRequest, background_tasks: BackgroundTask
     session_id = str(uuid.uuid4())
 
     # 验证流地址 (简单验证)
-    if not request.stream_url.startswith(('http://', 'rtsp://')):
+    if not request.stream_url.startswith('rtsp://'):
         raise HTTPException(
             status_code=400,
-            detail="Invalid stream URL. Must start with http:// or rtsp://"
+            detail="Invalid stream URL. Must start with rtsp://"
         )
 
-    # 更新会话信息
+    # 初始化会话信息
+    connection_manager.ensure_session(session_id, request.stream_url)
     connection_manager.update_session_stream(session_id, request.stream_url)
-    connection_manager.update_session_status(session_id, "pending")
+    connection_manager.update_session_status(session_id, SessionStatus.PENDING)
 
     # 启动后台分析任务
     task = asyncio.create_task(
@@ -174,7 +185,7 @@ async def stop_analysis(request: VideoStopRequest):
             pass
         del _analysis_tasks[session_id]
 
-    connection_manager.update_session_status(session_id, "stopped")
+    connection_manager.update_session_status(session_id, SessionStatus.STOPPED)
 
     return {
         "session_id": session_id,
@@ -242,5 +253,5 @@ frontend_router = APIRouter(tags=["frontend"])
 @frontend_router.get("/")
 async def index():
     """主页面"""
-    with open("/app/templates/index.html", "r") as f:
-        return HTMLResponse(content=f.read())
+    content = TEMPLATE_PATH.read_text(encoding="utf-8")
+    return HTMLResponse(content=content)

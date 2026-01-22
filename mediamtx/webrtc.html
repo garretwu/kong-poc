@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MediaMTX WebRTC Player</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        h1 { color: #333; }
+        #video {
+            width: 100%;
+            max-width: 800px;
+            background: #000;
+            display: block;
+            margin: 20px 0;
+            border-radius: 8px;
+        }
+        .controls { margin: 20px 0; }
+        button {
+            padding: 12px 24px;
+            cursor: pointer;
+            font-size: 16px;
+            border: none;
+            border-radius: 4px;
+            margin-right: 10px;
+        }
+        #playBtn { background: #4CAF50; color: white; }
+        #playBtn:disabled { background: #ccc; cursor: not-allowed; }
+        #stopBtn { background: #f44336; color: white; }
+        #stopBtn:disabled { background: #ccc; cursor: not-allowed; }
+        #status {
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+        .info { background: #e3f2fd; color: #1565c0; border-left: 4px solid #1565c0; }
+        .success { background: #e8f5e9; color: #2e7d32; border-left: 4px solid #2e7d32; }
+        .error { background: #ffebee; color: #c62828; border-left: 4px solid #c62828; }
+        .warning { background: #fff3e0; color: #e65100; border-left: 4px solid #e65100; }
+        .instructions {
+            background: #fff;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 10px 0;
+            border-left: 4px solid #2196F3;
+        }
+    </style>
+</head>
+<body>
+    <h1>MediaMTX WebRTC Player</h1>
+
+    <div class="instructions">
+        <strong>使用说明：</strong>
+        <ol>
+            <li>先启动推流: <code>ffmpeg -re -i BigBuckBunny.mp4 -c copy -f rtsp rtsp://localhost:8554/camera</code></li>
+            <li>点击 "Start Playing" 开始播放</li>
+        </ol>
+    </div>
+
+    <div id="status" class="info">Status: Ready - Click "Start Playing" to begin</div>
+
+    <div class="controls">
+        <button id="playBtn" onclick="startPlay()">Start Playing</button>
+        <button id="stopBtn" onclick="stopPlay()" disabled>Stop</button>
+    </div>
+
+    <video id="video" controls muted playsinline></video>
+
+    <script>
+        let pc = null;
+        let video = document.getElementById('video');
+        let playPromise = null;
+        let hasReceivedTrack = false;
+
+        function log(msg, type = 'info') {
+            document.getElementById('status').textContent = msg;
+            document.getElementById('status').className = type;
+            console.log(`[${type}] ${msg}`);
+        }
+
+        function safePlay() {
+            // 直接 play，不检查之前的请求
+            playPromise = video.play();
+            playPromise.then(() => {
+                log('Video playing!', 'success');
+            }).catch(err => {
+                // 忽略 play 错误（可能是被中断）
+                console.log('Play interrupted:', err.message);
+            });
+        }
+
+        async function startPlay() {
+            log('Connecting to WebRTC server...', 'info');
+            document.getElementById('playBtn').disabled = true;
+            hasReceivedTrack = false;
+
+            try {
+                // Create RTCPeerConnection
+                pc = new RTCPeerConnection({
+                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+                });
+
+                log('Created RTCPeerConnection', 'info');
+
+                // Handle incoming tracks
+                pc.ontrack = (event) => {
+                    log('ontrack event fired! Track count: ' + event.streams.length, 'success');
+                    const stream = event.streams[0];
+                    video.srcObject = stream;
+                    hasReceivedTrack = true;
+
+                    // 延迟一点再 play，避免被中断
+                    setTimeout(() => {
+                        safePlay();
+                    }, 100);
+                };
+
+                pc.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        console.log('ICE candidate:', event.candidate.candidate.substring(0, 30) + '...');
+                    }
+                };
+
+                pc.onconnectionstatechange = () => {
+                    const state = pc.connectionState;
+                    log('Connection state: ' + state,
+                        state === 'connected' ? 'success' :
+                        state === 'disconnected' || state === 'failed' ? 'error' : 'info');
+                };
+
+                pc.oniceconnectionstatechange = () => {
+                    console.log('ICE state:', pc.iceConnectionState);
+                };
+
+                pc.ondatachannel = (event) => {
+                    log('Data channel received: ' + event.channel.label, 'success');
+                    event.channel.onopen = () => log('Data channel opened', 'success');
+                };
+
+                // Create data channel for WHEP
+                const dataChannel = pc.createDataChannel('whep');
+                dataChannel.onopen = () => log('WHEP data channel opened', 'success');
+
+                // Create offer
+                log('Creating SDP offer...', 'info');
+                const offer = await pc.createOffer({
+                    offerToReceiveAudio: true,
+                    offerToReceiveVideo: true
+                });
+
+                // Add transceivers
+                pc.addTransceiver('video', { direction: 'recvonly' });
+                pc.addTransceiver('audio', { direction: 'recvonly' });
+
+                await pc.setLocalDescription(offer);
+                log('Local description set', 'info');
+
+                // Send HTTP POST with SDP offer
+                log('Sending SDP offer to server...', 'info');
+                const response = await fetch('http://localhost:8889/camera/whep', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/sdp',
+                        'Accept': 'application/sdp'
+                    },
+                    body: offer.sdp
+                });
+
+                if (!response.ok) {
+                    const error = await response.text();
+                    throw new Error(`HTTP ${response.status}: ${error}`);
+                }
+
+                const answerSDP = await response.text();
+                log('SDP answer received from server', 'success');
+
+                // Set remote description
+                await pc.setRemoteDescription({
+                    type: 'answer',
+                    sdp: answerSDP
+                });
+                log('Remote description set', 'info');
+
+            } catch (err) {
+                log('Error: ' + err.message, 'error');
+                console.error(err);
+                stopPlay();
+            }
+        }
+
+        function stopPlay() {
+            if (pc) {
+                pc.close();
+                pc = null;
+            }
+            video.srcObject = null;
+            playPromise = null;
+            document.getElementById('playBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = true;
+            log('Stopped', 'info');
+        }
+    </script>
+</body>
+</html>

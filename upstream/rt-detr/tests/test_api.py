@@ -78,21 +78,14 @@ class TestHealthEndpoint:
 class TestVideoRequestSchema:
     """Tests for VideoRequest model"""
 
-    def test_valid_request_with_http_url(self):
-        from app.models.schema import VideoRequest
-
-        request = VideoRequest(stream_url="http://example.com/stream.flv")
-
-        assert request.stream_url == "http://example.com/stream.flv"
-        assert request.enable_drawing is True
-        assert request.api_key is None
-
     def test_valid_request_with_rtsp_url(self):
         from app.models.schema import VideoRequest
 
         request = VideoRequest(stream_url="rtsp://localhost:8554/camera")
 
         assert request.stream_url == "rtsp://localhost:8554/camera"
+        assert request.enable_drawing is True
+        assert request.api_key is None
 
     def test_valid_request_with_custom_settings(self):
         from app.models.schema import VideoRequest
@@ -304,17 +297,13 @@ class TestStartAnalysisValidation:
 
         assert response.status_code == 422  # Validation error
 
-    def test_valid_http_url_accepted(self, test_client, mock_connection_manager):
+    def test_http_url_rejected(self, test_client, mock_connection_manager):
         response = test_client.post(
             "/api/v1/video/start",
             json={"stream_url": "http://example.com/stream.flv"}
         )
 
-        # Should create a session (returns 200)
-        assert response.status_code == 200
-        data = response.json()
-        assert "session_id" in data
-        assert data["status"] == "running"
+        assert response.status_code in [400, 422]
 
     def test_valid_rtsp_url_accepted(self, test_client, mock_connection_manager):
         response = test_client.post(

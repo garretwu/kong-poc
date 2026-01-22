@@ -22,6 +22,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 复制应用代码
 COPY app/ ./app/
 
+# 复制前端模板
+COPY templates/ ./templates/
+
 # 创建模型目录
 RUN mkdir -p /models
 

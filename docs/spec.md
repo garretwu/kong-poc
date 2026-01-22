@@ -25,43 +25,40 @@
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                                    用户浏览器                                 │
-│                              (WebSocket 实时接收结果)                         │
+│                   (HTTP 控制经 Kong + WebSocket 结果直连)                      │
 └─────────────────────────────────────────────────────────────────────────────┘
-                                      ▲
-                                      │ WebSocket
-                                      │
-┌─────────────────────────────────────┼─────────────────────────────────────┐
-│                                     │                                      │
-│  ┌──────────────┐    ┌─────────────┼─────────────┐    ┌─────────────────┐  │
-│  │   RTSP摄像头  │───▶│   MediaMTX   │◀──────────────▶│  Kong Gateway   │  │
-│  │ rtsp://xxx   │    │ (协议转换)    │    API Key   │   │  鉴权+负载均衡   │  │
-│  └──────────────┘    │ RTSP→HTTP-FLV│              │   └────────┬────────┘  │
-│                      └─────────────┘              │            │           │
-│                                                    │            │ FLV      │
-│                                                    │            ▼           │
-│                            ┌────────────────────────┴────────────┐          │
-│                            │       RT-DETR 分析服务 (FastAPI)     │          │
-│                            │  ┌─────────────────────────────────┐ │          │
-│                            │  │  • 视频流拉取模块 (FLV)          │ │          │
-│                            │  │  • 抽帧模块 (全帧率)             │ │          │
-│                            │  │  • RT-DETR 推理模块             │ │          │
-│                            │  │  • 结果封装模块                 │ │          │
-│                            │  │  • WebSocket 推送模块           │ │          │
-│                            │  └─────────────────────────────────┘ │          │
-│                            └──────────────────────────────────────┘          │
+          │ HTTP API
+          ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        Kong Gateway (鉴权 + 负载均衡)                          │
 └─────────────────────────────────────────────────────────────────────────────┘
+          │ HTTP
+          ▼
+┌─────────────────────────────────────┬─────────────────────────────────────┐
+│  ┌──────────────┐    ┌─────────────┐ │  ┌────────────────────────────────┐ │
+│  │   RTSP摄像头  │───▶│   MediaMTX   │─┼─▶│ RT-DETR 分析服务 (FastAPI)     │ │
+│  │ rtsp://xxx   │    │   RTSP 分发  │ │  │  • 视频流拉取模块 (RTSP)        │ │
+│  └──────────────┘    └─────────────┘ │  │  • 抽帧模块 (全帧率)             │ │
+│                                     │  │  • RT-DETR 推理模块             │ │
+│                                     │  │  • 结果封装模块                 │ │
+│                                     │  │  • WebSocket 推送模块           │ │
+│                                     │  └────────────────────────────────┘ │
+└─────────────────────────────────────┴─────────────────────────────────────┘
 ```
 
 ### 2.2 数据流
 
 ```
-1. 视频流接入
-   RTSP 摄像头 ──RTSP──▶ MediaMTX ──HTTP-FLV──▶ RT-DETR Service
+1. 控制请求
+   客户端 ──HTTP──▶ Kong ──HTTP──▶ RT-DETR Service (携带 stream_url)
 
-2. 视频分析
-   FLV 流 ──▶ 解封装 ──▶ 抽帧 (全帧率) ──▶ RT-DETR 推理 ──▶ 检测结果
+2. 视频流接入
+   RTSP 摄像头 ──RTSP──▶ MediaMTX ──RTSP──▶ RT-DETR Service
 
-3. 结果推送
+3. 视频分析
+   RTSP 流 ──▶ 解封装 ──▶ 抽帧 (全帧率) ──▶ RT-DETR 推理 ──▶ 检测结果
+
+4. 结果推送
    检测结果 ──▶ WebSocket ──▶ 浏览器 Canvas 绘制
 ```
 
@@ -74,27 +71,37 @@
 #### 3.1.1 配置要求
 ```yaml
 # conf.yaml
-rtmp: off                  # 关闭 RTMP，节省资源
-rtsp: on                   # 开启 RTSP 接收
-webrtc: off                # 关闭 WebRTC，由 Kong 处理
-hls: off                   # 关闭 HLS
-flv: on                    # 开启 FLV
-metrics: on                # 开启 metrics
+logLevel: info
+
+api: yes
+apiAddress: :9997
+
+metrics: yes
+metricsAddress: :9998
+
+rtsp: yes
+rtspAddress: :8554
+
+rtmp: no
+hls: no
+webrtc: no
+srt: no
 
 paths:
-  all: off                 # 不自动推流
-
-static:
-  secret: your_secret_key  # 可选：推流鉴权
+  camera:
+    source: publisher
 ```
 
 #### 3.1.2 流地址
 - 推流地址：`rtsp://mediamtx_ip:8554/camera`
-- 拉流地址（FLV）：`http://mediamtx_ip:8080/camera.flv`
+- 拉流地址（RTSP）：`rtsp://mediamtx_ip:8554/camera`
+- 推流/拉流测试建议携带 TCP 传输参数以减少丢包：`-rtsp_transport tcp`
 
 ---
 
 ### 3.2 Kong Gateway (API 网关)
+
+Kong 仅负责控制 API 的鉴权与转发，不参与 RTSP 媒体流传输。
 
 #### 3.2.1 插件配置
 ```yaml
@@ -127,7 +134,7 @@ services:
 
 #### 3.2.2 API Key 管理
 - 通过 Kong Admin API 或 Deck 管理 consumer 和 apikey
-- 格式：`Authorization: Bearer <api_key>` 或 `X-API-Key: <api_key>`
+- 当前默认 key 名称为 `apikey`，推荐请求头：`apikey: <api_key>`（同时兼容 `X-API-Key`）
 
 ---
 
@@ -145,7 +152,7 @@ rt-detr-service/
 │   │   └── schema.py              # Pydantic 模型
 │   ├── services/
 │   │   ├── __init__.py
-│   │   ├── video_stream.py        # FLV 视频流拉取
+│   │   ├── video_stream.py        # RTSP 视频流拉取
 │   │   ├── frame_extractor.py     # 抽帧模块
 │   │   ├── rt_detr_inference.py   # RT-DETR 推理
 │   │   └── websocket_manager.py   # WebSocket 连接管理
@@ -169,7 +176,7 @@ router = APIRouter(prefix="/api/v1/video", tags=["video"])
 
 class VideoRequest(BaseModel):
     """视频流分析请求"""
-    stream_url: str              # FLV 流地址
+    stream_url: str              # RTSP 流地址
     api_key: str                # Kong 鉴权后传递
     enable_drawing: bool = True  # 是否返回绘图结果
 
@@ -185,7 +192,7 @@ async def start_analysis(request: VideoRequest):
     启动视频流分析
 
     - 验证 API Key (由 Kong 注入)
-    - 启动 FLV 流拉取
+    - 启动 RTSP 流拉取
     - 启动抽帧和 RT-DETR 推理
     - 建立 WebSocket 连接用于结果推送
     """
@@ -246,8 +253,8 @@ class VideoFrame:
     timestamp: float          # 帧时间戳
     frame_index: int          # 帧序号
 
-class FLVStreamReader:
-    """FLV 流拉取器"""
+class RTSPStreamReader:
+    """RTSP 流拉取器"""
 
     def __init__(self, stream_url: str):
         self.stream_url = stream_url
@@ -255,7 +262,7 @@ class FLVStreamReader:
         self.running = False
 
     async def connect(self) -> bool:
-        """连接 FLV 流"""
+        """连接 RTSP 流"""
         self.cap = cv2.VideoCapture(self.stream_url)
         return self.cap.isOpened()
 
@@ -294,6 +301,10 @@ class FLVStreamReader:
         if self.cap:
             self.cap.release()
 ```
+
+> 实现补充：
+> - 运行时优先通过 `cv2.VideoCapture(stream_url, cv2.CAP_FFMPEG)` 并携带 `rtsp_transport=tcp`，降低 UDP 丢包造成的间歇中断。
+> - 增加 `get_stream_info()` 返回宽、高、FPS，便于在 WebSocket 建连后向前端推送流元数据。
 
 #### 3.3.4 RT-DETRv2 推理模块
 
@@ -609,8 +620,6 @@ services:
     container_name: mediamtx
     ports:
       - "8554:8554"   # RTSP
-      - "8080:8080"   # HTTP/FLV
-      - "8888:8888"   # WebRTC
     volumes:
       - ./mediamtx/conf.yaml:/mediamtx/conf.yaml
     restart: unless-stopped
@@ -657,6 +666,14 @@ services:
 networks:
   default:
     name: video-analysis-network
+
+### 5.2 长时间推流测试（本地）
+
+- 使用本地样例视频 `BigBuckBunny.mp4` 进行长时间推流，可通过 FFmpeg 循环方式避免视频过短导致的中断：
+  ```bash
+  ffmpeg -re -stream_loop -1 -i BigBuckBunny.mp4 -c copy -f rtsp -rtsp_transport tcp rtsp://localhost:8554/camera
+  ```
+- `-stream_loop -1` 表示无限循环；`-rtsp_transport tcp` 可减少网络抖动；推流进程可放后台以便持续为 RT-DETR 服务提供输入。
 ```
 
 ---
@@ -683,12 +700,14 @@ networks:
 
 ### 7.1 启动分析
 
+`stream_url` 需由 RT-DETR 直接访问（不经过 Kong）。
+
 **Endpoint:** `POST /api/v1/video/start`
 
 **Request:**
 ```json
 {
-    "stream_url": "http://mediamtx:8080/camera.flv",
+    "stream_url": "rtsp://mediamtx:8554/camera",
     "enable_drawing": true
 }
 ```
