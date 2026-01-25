@@ -12,7 +12,7 @@ class VideoRequest(BaseModel):
     stream_url: str = Field(
         ...,
         description="视频流地址 (RTSP)",
-        example="rtsp://mediamtx:8554/camera"
+        json_schema_extra={"example": "rtsp://mediamtx:8554/camera"}
     )
     enable_drawing: bool = Field(
         default=True,
