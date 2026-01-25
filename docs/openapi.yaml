@@ -1,0 +1,214 @@
+openapi: 3.0.3
+info:
+  title: Kong PoC APIs
+  version: 1.0.0
+  description: APIs for video analysis and LLM services behind Kong.
+servers:
+  - url: http://localhost:8000
+security:
+  - ApiKeyAuth: []
+paths:
+  /api/v1/video/start:
+    post:
+      summary: Start video analysis session
+      tags:
+        - video
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VideoStartRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoStartResponse'
+  /api/v1/video/stop:
+    post:
+      summary: Stop video analysis session
+      tags:
+        - video
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VideoStopRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoStopResponse'
+  /api/v1/video/sessions:
+    get:
+      summary: List active sessions
+      tags:
+        - video
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SessionInfo'
+  /api/v1/video/sessions/{session_id}:
+    get:
+      summary: Get session details
+      tags:
+        - video
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionInfo'
+  /api/v1/video/health:
+    get:
+      summary: Health check
+      tags:
+        - video
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /v1/chat/completions:
+    post:
+      summary: Create chat completion (Mock LLM)
+      tags:
+        - llm
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatCompletionRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+  /v2/chat/completions:
+    post:
+      summary: Create chat completion (vLLM)
+      tags:
+        - llm
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatCompletionRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: apikey
+  schemas:
+    VideoStartRequest:
+      type: object
+      required:
+        - stream_url
+      properties:
+        stream_url:
+          type: string
+          example: rtsp://mediamtx:8554/camera
+        enable_drawing:
+          type: boolean
+          default: true
+    VideoStartResponse:
+      type: object
+      properties:
+        session_id:
+          type: string
+        status:
+          type: string
+        message:
+          type: string
+    VideoStopRequest:
+      type: object
+      required:
+        - session_id
+      properties:
+        session_id:
+          type: string
+    VideoStopResponse:
+      type: object
+      properties:
+        session_id:
+          type: string
+        status:
+          type: string
+        message:
+          type: string
+    SessionInfo:
+      type: object
+      properties:
+        session_id:
+          type: string
+        status:
+          type: string
+        frame_count:
+          type: integer
+        stream_url:
+          type: string
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        model_loaded:
+          type: boolean
+        gpu_available:
+          type: boolean
+        uptime_seconds:
+          type: number
+    ChatCompletionRequest:
+      type: object
+      required:
+        - messages
+      properties:
+        model:
+          type: string
+          example: mock-llm
+        messages:
+          type: array
+          items:
+            type: object
+            properties:
+              role:
+                type: string
+              content:
+                type: string
+        stream:
+          type: boolean
+          default: false
+        ttft_ms:
+          type: integer
+          description: Delay before first token in ms
