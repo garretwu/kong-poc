@@ -12,6 +12,13 @@ import cv2
 app_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(app_dir))
 
+# Ensure the rt-detr package named "app" wins over other modules
+existing_app = sys.modules.get("app")
+if existing_app is not None:
+    module_file = getattr(existing_app, "__file__", "") or ""
+    if str(app_dir) not in module_file:
+        del sys.modules["app"]
+
 
 @pytest.fixture
 def sample_image():

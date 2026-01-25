@@ -178,7 +178,7 @@ class TestSettings:
         from app.config import Settings
 
         settings = Settings()
-        schema = settings.schema()
+        schema = settings.model_json_schema()
 
         assert "title" in schema
         assert "model_path" in schema["properties"]

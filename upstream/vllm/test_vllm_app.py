@@ -1,11 +1,16 @@
 """Test script for vLLM server."""
 import json
-import subprocess
+import os
 import sys
 import time
+
+import pytest
 import requests
 
-BASE_URL = "http://localhost:8100"
+BASE_URL = os.getenv("VLLM_BASE_URL", "http://localhost:8100")
+
+if os.getenv("VLLM_E2E") != "1":
+    pytest.skip("vLLM E2E tests disabled. Set VLLM_E2E=1 to enable.", allow_module_level=True)
 
 
 def wait_for_server(url: str, timeout: int = 60) -> bool:
@@ -24,7 +29,7 @@ def wait_for_server(url: str, timeout: int = 60) -> bool:
 
 def test_health():
     """Test health endpoint."""
-    resp = requests.get(f"{BASE_URL}/healthz")
+    resp = requests.get(f"{BASE_URL}/healthz", timeout=10)
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "ok"
@@ -42,6 +47,7 @@ def test_non_streaming():
             ],
             "stream": False,
         },
+        timeout=30,
     )
     assert resp.status_code == 200
     data = resp.json()
@@ -65,6 +71,7 @@ def test_streaming():
             "stream": True,
         },
         stream=True,
+        timeout=30,
     )
     assert resp.status_code == 200
 
